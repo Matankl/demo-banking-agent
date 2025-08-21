@@ -52,8 +52,8 @@ def pipeline(
 
     # Compute sentiment data
     sentiment_fn = project.get_function("data")
-    sentiment_fn.with_requests(cpu=6)
-    sentiment_fn.with_limits(cpu=6)
+    sentiment_fn.with_requests(cpu=2)
+    sentiment_fn.with_limits(cpu=4)
     sentiment = project.run_function(
         sentiment_fn,
         handler="sentiment_analysis",
