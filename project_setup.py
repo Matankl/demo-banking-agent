@@ -1,12 +1,12 @@
 import os
 import shutil
 import mlrun
-from pathlib import Path
 
 
 def setup(project: mlrun.projects.MlrunProject) -> mlrun.projects.MlrunProject:
     source = project.get_param("source", default=None)
-    force_build = project.get_param("force_build", default=False)
+    build_image = project.get_param("build_image", default=False)
+    default_image = project.get_param("default_image", default=None)
 
     # Adding secrets to the projects:
     assert (os.environ.get("OPENAI_API_KEY", None) is not None) and (os.environ.get("OPENAI_BASE_URL", None) is not None), "\
@@ -25,22 +25,24 @@ def setup(project: mlrun.projects.MlrunProject) -> mlrun.projects.MlrunProject:
         print(f"Project Source: {source}")
         source = proj_artifact.target_path
 
+    if default_image:
+        project.set_default_image(default_image)
+
     # Set default project docker image - functions that do not specify image will use this
-    if force_build:    
+    if build_image:    
+        print("Building default image for the demo:")
         project.set_source(source, pull_at_runtime=False)    
         project.build_image(
+            image=default_image,
             base_image='mlrun/mlrun-kfp',
             set_as_default=True,
             overwrite_build_params=True,
-            with_mlrun=False,
             requirements=['PyGithub==1.59.0',
                           'deepchecks==0.18.1',
                           'pandera==0.20.3',
                           'transformers==4.48.1',
                           'datasets==3.2.0',
                           'torch==1.13.1'])
-    else:
-        project.set_default_image(f'.mlrun-project-image-{project.name}')
 
     # MLRun Functions
     project.set_function(
