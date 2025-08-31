@@ -1,5 +1,4 @@
 import os
-import shutil
 import tarfile
 import mlrun
 
@@ -81,7 +80,7 @@ def setup(project: mlrun.projects.MlrunProject) -> mlrun.projects.MlrunProject:
 
 def make_archive(base_name, format="gztar", root_dir=".", exclude=None):
     """
-    Create a tar.gz archive like shutil.make_archive but with exclusions.
+    Create a tar.gz archive with exclusions.
     
     Args:
         base_name (str): Output file name (without extension).
