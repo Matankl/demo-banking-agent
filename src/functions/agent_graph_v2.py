@@ -494,6 +494,12 @@ class BankingAgent(V2ModelServer):
         model, tools, and system prompt.
         """
 
+        if self.vector_db_args.get("uri").startswith("store://"):
+            vectordb_path = mlrun.get_dataitem(
+                self.vector_db_args["uri"]
+            ).local()
+            self.vector_db_args["uri"] = vectordb_path
+
         print("Establishing connection to OpenAI")
         self.vectorstore = Milvus(
             collection_name=self.vector_db_collection,
