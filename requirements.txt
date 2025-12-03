@@ -16,5 +16,6 @@ torch==2.8.0
 transformers==4.48.0
 unstructured==0.18.3
 v3io-frames==0.13.10
+duckduckgo_search==8.1.1
 pymilvus
 milvus-lite

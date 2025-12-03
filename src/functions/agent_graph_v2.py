@@ -498,8 +498,11 @@ class BankingAgent(V2ModelServer):
             vectordb_path = mlrun.get_dataitem(
                 self.vector_db_args["uri"]
             ).local()
-            self.vector_db_args["uri"] = vectordb_path
 
+            self.vector_db_args["uri"] = f"{vectordb_path}"
+            import time
+            time.sleep(5)  # wait for the file to be available locally
+            
         print("Establishing connection to OpenAI")
         self.vectorstore = Milvus(
             collection_name=self.vector_db_collection,
