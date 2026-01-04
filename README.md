@@ -63,7 +63,7 @@ The banking agent demo architecture is customizable, with observability for proj
    ```
   [Configure MLRun](https://docs.mlrun.org/en/stable/install.html) with access to your cluster or local environment.
 
-3. Set OpenAI credentials
+3. Set OpenAI credentials (You can use your oun GPU instead)
 
   Copy the [env file](.env.example) as `ai_gateway.env` and update to include:
   - `OPENAI_API_KEY`: Your OpenAI API key.
