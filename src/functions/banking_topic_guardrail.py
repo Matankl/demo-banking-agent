@@ -1,5 +1,4 @@
 import mlrun
-#from mlrun.serving.v2_serving import V2ModelServer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from typing import Any, Optional
 
