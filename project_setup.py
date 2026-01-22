@@ -49,7 +49,6 @@ def setup(project: mlrun.projects.MlrunProject) -> mlrun.projects.MlrunProject:
             set_as_default=True,
             overwrite_build_params=True,
             with_mlrun=False,
-            # requirements_file="requirements-churn.txt"
             commands = [
                 "pip install -U --index-url https://download.pytorch.org/whl/cpu "
                 "--extra-index-url https://pypi.org/simple "
