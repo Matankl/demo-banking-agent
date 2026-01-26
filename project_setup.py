@@ -4,6 +4,7 @@ from pathlib import Path
 import fnmatch
 
 import mlrun
+from mlrun.datastore.datastore_profile import OpenAIProfile
 
 def setup(project: mlrun.projects.MlrunProject) -> mlrun.projects.MlrunProject:
     source = project.get_param("source", default=None)
