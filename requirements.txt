@@ -18,7 +18,7 @@ s3fs==2024.6.1
 torch==2.8.0
 transformers==4.53.0
 unstructured==0.18.3
-v3io-frames==0.13.10
+v3io-frames
 duckduckgo_search==8.1.1
 pymilvus
 milvus-lite

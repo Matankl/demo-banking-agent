@@ -10,7 +10,7 @@ The banking agent demo architecture is customizable, with observability for proj
 - Banking customer service chatbot with conditional routing
 - Model behavior adapts to conversation history, sentiment, and churn propensity
 - Modular, customizable architecture
-- Observability for project, tabular, and generative models
+- Observability for project, tabular, and generative models 
 
 **Technical capabilities:**
 - End-to-end ML pipeline: training and serving for churn prediction

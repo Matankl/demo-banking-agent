@@ -4,6 +4,7 @@ from pathlib import Path
 import fnmatch
 
 import mlrun
+from mlrun.datastore.datastore_profile import OpenAIProfile
 
 def setup(project: mlrun.projects.MlrunProject) -> mlrun.projects.MlrunProject:
     source = project.get_param("source", default=None)
@@ -49,7 +50,6 @@ def setup(project: mlrun.projects.MlrunProject) -> mlrun.projects.MlrunProject:
             set_as_default=True,
             overwrite_build_params=True,
             with_mlrun=False,
-            # requirements_file="requirements-churn.txt"
             commands = [
                 "pip install -U --index-url https://download.pytorch.org/whl/cpu "
                 "--extra-index-url https://pypi.org/simple "
