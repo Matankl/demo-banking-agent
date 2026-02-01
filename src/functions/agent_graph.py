@@ -13,11 +13,11 @@ Implements the core serving graph and model servers for the Banking Agent Demo a
 These components are orchestrated in a serving graph (see 03_application_deployment.ipynb) to process user queries, enforce safety, analyze sentiment and churn propensity, and generate context-aware responses using LLMs and vector search.
 """
 
+import logging
 import jmespath
 import mlrun
 import openai
 import requests
-from langchain.agents import create_react_agent
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import create_retriever_tool
 from langchain_milvus import Milvus
@@ -29,17 +29,25 @@ from langchain_core.prompts import PromptTemplate
 from typing import Any, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer, RobertaForSequenceClassification, pipeline
 import torch
+from langchain.agents import AgentExecutor, create_react_agent
+
+# Configure logger
+logger = logging.getLogger(__name__)
+
+
 
 def enrich_request(event: dict):
-    print("Inside enrich_request")
-    print("This is the event in the beginning: ",event)
+    logger.info("[enrich_request] Processing incoming request")
+    logger.debug(f"[enrich_request] Input event keys: {list(event.keys())}")
+    
     # assumes your request body has: {"inputs": [{"role": "...", "content": "..."} , ...]}
     last_content = (event.get("inputs") or [{}])[-1].get("content")
 
     # Fill only if missing, so you can still override when needed
-    event["latest_user_message"]= last_content
+    event["latest_user_message"] = last_content
     event["question"] = last_content
-    print("This is the event in the end of enrich_request: ",event)
+    
+    logger.info(f"[enrich_request] Extracted question: {last_content[:100] if last_content else 'None'}...")
     return event
 
 
@@ -58,15 +66,12 @@ def _format_question(question: str, role: str = "user"):
 def accept(event):
     """
     Accept handler for valid input.
-
     Returns the event unchanged if all guardrails pass.
 
     :param event: The event dictionary.
-
     :returns: The event unchanged if all guardrails pass.
     """
-    print("ACCEPT")
-    print("This is the event: ",event)
+    logger.info("[accept] Guardrails passed - proceeding with request")
     return event
 
 
@@ -80,8 +85,8 @@ def reject(event):
 
     :returns: The event with a standard rejection message if any guardrail fails.
     """
-    print("REJECT")
-    print("This is the event: ",event)
+    logger.warning("[reject] Guardrails failed - request blocked")
+    logger.debug(f"[reject] Blocked question: {event.get('question', 'N/A')}")
     event["outputs"] = [
         "As a banking agent, I am not allowed to talk on this subject. Is there anything else I can help with?"
     ]
@@ -91,14 +96,44 @@ def reject(event):
 def responder(event):
     """
     Final responder handler.
-
-    Returns the event as the final output of the serving graph.
-
-    :param event: The event dictionary.
-
-    :returns: The event as the final output of the serving graph.
+    Restructures the event to match what frontend_ui.py expects.
     """
-    return event
+    # Get the raw outputs from different steps
+    guardrails = event.get("guardrails_output", {})
+
+    # Build the response structure frontend expects
+    response = {
+        # Main output (fallback for frontend)
+        "outputs": event.get("outputs", []),
+
+        # Banking agent output (primary path for frontend)
+        "banking-agent": {
+            "outputs": event.get("banking-agent", {}).get("outputs",
+                       {"response": event.get("outputs", []), "tool_calls": []})
+        },
+
+        # Guardrails output - convert 'response'/'answer' to 'outputs'
+        "guardrails_output": {
+            "toxicity-guardrail": {
+                "outputs": guardrails.get("toxicity-guardrail", {}).get("response", [True])
+            },
+            "banking-topic-guardrail": {
+                "outputs": [guardrails.get("banking-topic-guardrail", {}).get("answer", True)]
+            },
+        },
+
+        # Input analysis - restructure from flat to nested format
+        "input_analysis_output": {
+            "sentiment-analysis": {
+                "outputs": event.get("sentiment_analysis_output", {}).get("response", [None])
+            },
+            "churn-prediction": {
+                "outputs": event.get("churn_model_output", {}).get("response", [None])
+            },
+        },
+    }
+
+    return response
 
 
 class GuardrailsChoice(Choice):
@@ -127,8 +162,7 @@ class GuardrailsChoice(Choice):
 
         :returns: A list with the selected outlet(s) based on the guardrails' evaluation.
         """
-        print("SELECT_OUTLETS inside 'GuardrailsChoice'")
-        print("This is the event: ",event)
+        logger.info("[GuardrailsChoice] Evaluating guardrail outputs")
         flag = True
         for guardrail, output in event["guardrails_output"].items():
             # common patterns you have in your data:
@@ -140,10 +174,13 @@ class GuardrailsChoice(Choice):
                 # unknown schema: treat as pass or fail depending on your policy
                 val = True
 
+            logger.debug(f"[GuardrailsChoice] {guardrail}: {val}")
             if str(val) == "False":
                 flag = False
 
-        return [self.mapping[str(flag)]]
+        decision = self.mapping[str(flag)]
+        logger.info(f"[GuardrailsChoice] Decision: {decision}")
+        return [decision]
 
 
 class ParallelRunMerger(ParallelRun):
@@ -161,7 +198,8 @@ class ParallelRunMerger(ParallelRun):
 
     def merger(self, body, results):
         body[self.output_key] = results
-        print("Body input (ParallelRunMerger): ",body)
+        logger.info(f"[ParallelRunMerger] Merged {len(results)} results into '{self.output_key}'")
+        logger.debug(f"[ParallelRunMerger] Result keys: {list(results.keys())}")
         return body
 
 
@@ -204,7 +242,7 @@ class SentimentAnalysisModelServer(mlrun.serving.Model):
             top_k=self.top_k,
         )
 
-    def predict(self, inputs: dict) -> str:
+    def predict(self, inputs: dict) -> dict:
         """
         Predicts the sentiment label for the latest input message.
 
@@ -213,11 +251,15 @@ class SentimentAnalysisModelServer(mlrun.serving.Model):
 
         :returns: A list containing the predicted sentiment label as a string.
         """
-        print("Inside SentimentAnalysisModelServer predict, this is the inputs: ",inputs)
+        logger.info("[SentimentAnalysis] Analyzing sentiment")
         message = inputs["inputs"][-1]["content"]
-        print("Inside sentiment-analysis step")
-        print("MESSAGE", message)
-        return {"response": [self.sentiment_classifier(message)[0][0]["label"]]}
+        logger.debug(f"[SentimentAnalysis] Message: {message[:100]}...")
+        
+        sentiment = self.sentiment_classifier(message)[0][0]["label"]
+        inputs["response"] = [sentiment]
+        
+        logger.info(f"[SentimentAnalysis] Result: {sentiment}")
+        return inputs
 
 
 class ChurnModelServer(mlrun.serving.Model):
@@ -280,21 +322,25 @@ class ChurnModelServer(mlrun.serving.Model):
 
         :returns: A list containing the predicted churn label(s) for the user.
         """
-        print("Inside churn prediction step")
-        print("INPUTS", inputs)
+        user_id = inputs.get("user_id")
+        logger.info(f"[ChurnPrediction] Predicting churn for user_id={user_id}")
+        
         resp = requests.post(
-            url=self.endpoint_url, json={"inputs": [self.data[inputs["user_id"]]]}
+            url=self.endpoint_url, json={"inputs": [self.data[user_id]]}
         )
         resp_json = resp.json()
         churn_score = resp_json["results"][0]
 
-        # TODO: add churn score mapping into the churn model itself
         def map_churn_score(value):
             for label, threshold in self.thresholds:
                 if value >= threshold:
                     return label
 
-        return {"response": [map_churn_score(churn_score)]}
+        churn_label = map_churn_score(churn_score)
+        inputs["response"] = [churn_label]
+        
+        logger.info(f"[ChurnPrediction] Result: {churn_label} (score={churn_score:.3f})")
+        return inputs
 
 
 class BuildContext:
@@ -346,18 +392,26 @@ class BuildContext:
                 "churn": "high",
             }
 
-        :param event: The input event dictionary containing data to extract context from.
+        :param event: The input event (either full Event object or dict body) containing data to extract context from.
 
-        :returns: The updated event dictionary with the formatted question added under the specified output key.
+        :returns: The updated event with the formatted question added under the specified output key.
         """
-        print(f"Processing event: {event}")
-        print(f"Context mapping: {self.context_mappings}")
+        logger.info("[BuildContext] Building LLM context from event")
+        
+        # Handle both full Event objects and body-only dicts
+        if hasattr(event, 'body'):
+            body = event.body
+        else:
+            body = event
 
-        extracted_context = {k: jmespath.search(v, event) for k, v in self.context_mappings.items()}
+        extracted_context = {k: jmespath.search(v, body) for k, v in self.context_mappings.items()}
+        logger.debug(f"[BuildContext] Extracted context: {extracted_context}")
 
-        event[self.output_key] = [
+        body[self.output_key] = [
             _format_question(self.prompt.format(**extracted_context), role=self.role)
         ]
+        
+        logger.info(f"[BuildContext] Context built with keys: {list(extracted_context.keys())}")
         return event
 
 
@@ -392,7 +446,7 @@ class BankingAgentOpenAI(mlrun.serving.LLModel):
             import time
             time.sleep(5)
 
-        # 1) Create an LLM object (NOT a string)
+        # 1) Create an LLM object
         self.llm = ChatOpenAI(model=self.model_name, temperature=0)
 
         # 2) Vector store + retriever tool
@@ -408,37 +462,53 @@ class BankingAgentOpenAI(mlrun.serving.LLModel):
             description=self.vector_db_description,
         )
 
-        # 3) ReAct prompt TEMPLATE (must contain tools/tool_names/agent_scratchpad)
+        # 3) ReAct prompt template
         react_template = """{system_prompt}
 
         You have access to the following tools:
         {tools}
-        
+
         Use the following format:
-        
-        Question: {input}
+
+        Question: the input question you must answer
         Thought: you should always think about what to do
-        Action: one of [{tool_names}]
+        Action: the action to take, should be one of [{tool_names}]
         Action Input: the input to the action
         Observation: the result of the action
-        ... (repeat Thought/Action/Action Input/Observation as needed)
+        ... (this Thought/Action/Action Input/Observation can repeat N times)
         Thought: I now know the final answer
-        Final: the final answer to the user
-        
+        Final Answer: the final answer to the original input question
+
+        IMPORTANT: If you already know the answer without needing to use any tools, 
+        you can skip the Action step and go directly to:
+        Thought: I know the answer to this question.
+        Final Answer: <your answer here>
+
         Begin!
-        
+
         Question: {input}
-        {agent_scratchpad}
+        Thought:{agent_scratchpad}
         """
         prompt = PromptTemplate.from_template(react_template).partial(
             system_prompt=self.system_prompt
         )
 
         # 4) Create agent runnable
-        self.agent = create_react_agent(
+        tools = [DuckDuckGoSearchRun(), self.retriever_tool]
+        agent = create_react_agent(
             llm=self.llm,
-            tools=[DuckDuckGoSearchRun(), self.retriever_tool],
+            tools=tools,
             prompt=prompt,
+        )
+
+        # 5) Wrap with AgentExecutor
+        self.agent_executor = AgentExecutor(
+            agent=agent,
+            tools=tools,
+            verbose=True,
+            handle_parsing_errors=True,
+            max_iterations=5,  # Stop after 5 attempts
+
         )
 
     def _messages_to_input_text(self, messages: Any) -> str:
@@ -459,22 +529,41 @@ class BankingAgentOpenAI(mlrun.serving.LLModel):
             parts.append(f"{role}: {content}")
         return "\n".join(parts).strip()
 
-    def predict(self, request: dict[str, Any]):
-        print("Inside BankingAgentOpenAI predict, this is the request: ", request)
-        # Your original line: messages = request[prompt_key] + request[messages_key]
-        messages = request[self.prompt_input_key] + request[self.messages_input_key]
-        input_text = self._messages_to_input_text(messages)
+    def predict(
+            self,
+            body: dict[str, Any],
+            messages: list = None,
+            invocation_config: Optional[dict] = None,
+            **kwargs,
+    ):
+        logger.info("[BankingAgentOpenAI] Processing request")
 
-        # ReAct agent expects {"input": ...}, not {"messages": ...}
-        resp = self.agent.invoke({"input": input_text})
+        # Prefer MLRun-provided `messages` if present, otherwise fall back to graph payload
+        if messages:
+            combined_messages = messages
+            logger.debug("[BankingAgentOpenAI] Using MLRun-provided messages")
+        else:
+            prompt_messages = body.get(self.prompt_input_key, [])
+            user_messages = body.get(self.messages_input_key, [])
+            if not user_messages:
+                sentiment_output = body.get("sentiment_analysis_output", {})
+                if isinstance(sentiment_output, dict):
+                    user_messages = sentiment_output.get(self.messages_input_key, [])
+            combined_messages = prompt_messages + user_messages
+            logger.debug(f"[BankingAgentOpenAI] Combined {len(combined_messages)} messages from body")
 
-        # Depending on LC version, `resp` may be a string or a dict.
-        # In many versions, create_react_agent returns the final string directly.
-        response_text = resp if isinstance(resp, str) else resp.get("output", str(resp))
+        input_text = self._messages_to_input_text(combined_messages)
+        logger.debug(f"[BankingAgentOpenAI] Input text length: {len(input_text)} chars")
+        
+        resp = self.agent_executor.invoke({"input": input_text})
+        response_text = resp.get("output", str(resp))
 
-        # Tool call parsing: with ReAct runnable, tool traces are usually in intermediate steps,
-        # not in resp["messages"]. If you need UI tool logs, consider AgentExecutor with return_intermediate_steps=True.
-        return {"response": [response_text], "tool_calls": []}
+        # Pass through full body with outputs added
+        body["outputs"] = [response_text]
+        body["tool_calls"] = []
+        
+        logger.info(f"[BankingAgentOpenAI] Response generated ({len(response_text)} chars)")
+        return body
 
 
 class BankingAgentHuggingFace(mlrun.serving.LLModel):
@@ -514,17 +603,24 @@ class BankingAgentHuggingFace(mlrun.serving.LLModel):
         if body.get(self.prompt_input_key):
             # formatted_prompt in your graph is a list of {"role","content"} dicts
             msgs += body[self.prompt_input_key]
-        if body.get(self.messages_input_key):
-            msgs += body[self.messages_input_key]
+        # Get user messages - check top level first, then nested in sentiment_analysis_output
+        user_messages = body.get(self.messages_input_key, [])
+        if not user_messages:
+            # Look for inputs in sentiment_analysis_output (due to ModelRunnerStep structure)
+            sentiment_output = body.get("sentiment_analysis_output", {})
+            if isinstance(sentiment_output, dict):
+                user_messages = sentiment_output.get(self.messages_input_key, [])
+
+        if user_messages:
+            msgs += user_messages
         return msgs
 
     def predict(self, body: Any, messages: list = None, invocation_config: Optional[dict] = None, **kwargs):
-        print("Inside BankingAgentHuggingFace predict, this is the body: ", body)
-        print("This is the messages: ", messages)
+        logger.info("[BankingAgentHuggingFace] Processing request")
 
         msgs = self._coerce_messages(body, messages)
-
-        # Minimal chat->text prompt (you can refine formatting per your model’s chat template)
+        logger.debug(f"[BankingAgentHuggingFace] Processing {len(msgs)} messages")
+        
         prompt = "\n".join([f"{m.get('role','user')}: {m.get('content','')}" for m in msgs]).strip()
         prompt += "\nassistant:"
 
@@ -538,9 +634,15 @@ class BankingAgentHuggingFace(mlrun.serving.LLModel):
             temperature=self.temperature,
         )
         decoded = self.tokenizer.decode(out[0], skip_special_tokens=True)
-
-        # Basic “strip prompt prefix” (often good enough; adjust per model)
         answer = decoded[len(decoded) - max(0, len(decoded) - len(prompt)) :]
         answer = answer.replace("assistant:", "").strip() or decoded.strip()
 
-        return {"response": [answer], "tool_calls": []}
+        # Pass through full body with outputs added
+        body["outputs"] = [answer]
+        body["tool_calls"] = []
+        
+        logger.info(f"[BankingAgentHuggingFace] Response generated ({len(answer)} chars)")
+        return body
+
+
+
