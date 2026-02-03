@@ -13,11 +13,9 @@ Intended for validating model deployments in the Banking Agent Demo or similar M
 """
 
 import json
-# import os
 from datetime import datetime
 
 import numpy as np
-# import pandas as pd
 import requests
 from mlrun.artifacts import ChartArtifact
 from mlrun.datastore import DataItem

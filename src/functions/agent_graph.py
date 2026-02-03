@@ -1,5 +1,5 @@
 """
-agent_graph_v2.py
+agent_graph.py
 ==================
 
 Implements the core serving graph and model servers for the Banking Agent Demo application. This module defines custom MLRun model servers and utility classes for:
