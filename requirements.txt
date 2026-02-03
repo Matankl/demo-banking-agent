@@ -24,3 +24,4 @@ pymilvus
 milvus-lite
 scikit-learn==1.5.2
 streamlit
+sentence-transformers
