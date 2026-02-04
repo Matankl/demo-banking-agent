@@ -2,6 +2,8 @@
 
 This demo showcases a modular, production-grade banking customer service chatbot. It combines traditional machine learning (churn propensity) and large language models (LLMs) in a single, observable inference pipeline. The system features conditional routing based on guardrails (banking topic and toxicity filtering), and dynamically adapts model behavior using conversation history, sentiment, and churn risk.
 
+In this demo the user can choose to use remote LLM (we used openAI) or a local LLM (in the demo we used Qwen).
+Note: for demonstration purposes we used a model that does not require GPU. However, this model has significantly less accurate results and slow performance.
 ## Overview
 
 The banking agent demo architecture is customizable, with observability for project, tabular, and generative models. MLRun is used to orchestrate the entire workflow, from data processing to model deployment and serving.

@@ -1,4 +1,3 @@
-
 import warnings
 from typing import List
 import typing
@@ -34,7 +33,7 @@ class ChurnModel(mlrun.serving.Model):
         # Only interested in churn likelihood
         body['results'] = [i[1] for i in result.tolist()]
         return body
-    
+
 
     def get_model(self, suffix=""):
         """get the model file(s) and metadata from model store
